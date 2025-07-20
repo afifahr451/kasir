@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Kasir - Input Orderan</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="html2pdf.bundle.min.js"></script>
+  <style>
+    /* Tambahan styling sederhana untuk bulk input dan modal */
+    #bulkInput {
+      width: 100%;
+      min-height: 100px;
+      margin-top: 10px;
+      font-family: monospace;
+    }
+    #bulkAddBtn {
+      margin-top: 5px;
+      margin-bottom: 20px;
+      padding: 8px 16px;
+      cursor: pointer;
+    }
+    .modal {
+      display:none;
+      position: fixed;
+      z-index: 1000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      overflow:auto;
+    }
+    .modal-content {
+      background: white;
+      margin: 10% auto;
+      padding: 20px;
+      width: 90%;
+      max-width: 600px;
+      border-radius: 6px;
+      position: relative;
+    }
+    .close {
+      position: absolute;
+      right: 15px;
+      top: 10px;
+      font-size: 28px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Orderan Nasi Cumi Bang Doel</h1>
+    <form id="orderForm">
+      <label for="customerName">Nama Pemesan:</label>
+      <input type="text" id="customerName" name="customerName" required>
+
+      <label for="quantity">Jumlah:</label>
+      <input type="number" id="quantity" name="quantity" required min="1">
+
+      <label for="paymentStatus">Status Pembayaran:</label>
+      <select id="paymentStatus" name="paymentStatus" required>
+        <option value="✅">Sudah Bayar</option>
+        <option value="❌">Belum Bayar</option>
+      </select>
+
+      <button type="submit">Tambah Order</button>
+    </form>
+
+    <!-- Bulk Input -->
+    <h3>Input Bulk Pesanan (format: Nama Jumlah [✅]: )</h3>
+    <textarea id="bulkInput" placeholder="Contoh:
+Bang iyan 1 X:
+Dando 1 maka X:
+Andy Lau 2 ✅:"></textarea>
+    <button id="bulkAddBtn" type="button">Tambahkan Pesanan Massal</button>
+
+    <h2>Daftar Orderan</h2>
+    <table id="orderList">
+      <thead>
+        <tr>
+          <th>Nama Pemesan</th>
+          <th>Menu</th>
+          <th>Jumlah</th>
+          <th>Harga Satuan</th>
+          <th>Total Harga</th>
+          <th>Status</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="total">
+      <h3>Total Uang yang Sudah Dibayar (hutang pelanggan): KHR <span id="paidAmount">0</span></h3>
+      <h3>Total Uang yang Belum Dibayar (kekayaan saat ini): KHR <span id="unpaidAmount">0</span></h3>
+      <h3>Total Kekayaan: KHR <span id="totalAmount">0</span></h3>
+    </div>
+
+    <button id="processBtn">Process</button>
+  </div>
+
+  <!-- Modal Struk -->
+  <div id="receiptModal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeReceipt()">&times;</span>
+      <div id="receiptContent" style="padding: 20px;"></div>
+    </div>
+  </div>
+
+  <script>
+    const PRICE = 12000;
+    const MENU_NAME = "Nasi Cumi + Bayam";
+
+    const orderForm = document.getElementById('orderForm');
+    const orderList = document.getElementById('orderList').querySelector('tbody');
+    const totalAmount = document.getElementById('totalAmount');
+    const paidAmount = document.getElementById('paidAmount');
+    const unpaidAmount = document.getElementById('unpaidAmount');
+
+    const bulkInput = document.getElementById('bulkInput');
+    const bulkAddBtn = document.getElementById('bulkAddBtn');
+    const processBtn = document.getElementById('processBtn');
+    const receiptModal = document.getElementById('receiptModal');
+    const receiptContent = document.getElementById('receiptContent');
+
+    let orders = [];
+
+    // Fungsi update tampilan tabel dan total
+    function renderOrders() {
+      orderList.innerHTML = '';
+      let totalAll = 0, paid = 0, unpaid = 0;
+      orders.forEach((order, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${order.customerName}</td>
+          <td>${order.menu}</td>
+          <td>${order.quantity}</td>
+          <td>KHR ${order.price.toLocaleString()}</td>
+          <td>KHR ${order.total.toLocaleString()}</td>
+          <td>${order.paymentStatus}</td>
+          <td><button onclick="deleteOrder(${index})">Hapus</button></td>
+        `;
+        orderList.appendChild(row);
+        totalAll += order.total;
+        if (order.paymentStatus === '✅') paid += order.total;
+        else unpaid += order.total;
+      });
+
+      totalAmount.textContent = totalAll.toLocaleString();
+      paidAmount.textContent = paid.toLocaleString();
+      unpaidAmount.textContent = unpaid.toLocaleString();
+    }
+
+    // Tambah order dari form biasa
+    orderForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const customerName = document.getElementById('customerName').value.trim();
+      const quantity = parseInt(document.getElementById('quantity').value);
+      const paymentStatus = document.getElementById('paymentStatus').value;
+
+      if(customerName && quantity > 0){
+        const total = PRICE * quantity;
+        orders.push({customerName, menu: MENU_NAME, quantity, price: PRICE, total, paymentStatus});
+        renderOrders();
+        orderForm.reset();
+      }
+    });
+
+    // Hapus order
+    function deleteOrder(index){
+      orders.splice(index, 1);
+      renderOrders();
+    }
+    window.deleteOrder = deleteOrder; // expose function untuk onclick tombol
+
+    // Tambah order bulk
+    bulkAddBtn.addEventListener('click', function(){
+      const bulkText = bulkInput.value.trim();
+      if(!bulkText) return alert("Masukkan data pesanan bulk terlebih dahulu.");
+
+      const lines = bulkText.split('\n');
+      lines.forEach(line => {
+        if(!line.trim()) return;
+
+        // Format: Nama Jumlah [✅ optional] :  (contoh "Andy Lau 2 ✅:")
+        const regex = /^(.+?)\s+(\d+)\s*(✅)?\s*:?$/;
+        const match = line.match(regex);
+
+        if(match){
+          const customerName = match[1].trim();
+          const quantity = parseInt(match[2]);
+          const isPaid = match[3] === '✅';
+
+          const paymentStatus = isPaid ? '✅' : '❌';
+          const total = PRICE * quantity;
+
+          orders.push({customerName, menu: MENU_NAME, quantity, price: PRICE, total, paymentStatus});
+        }else{
+          alert(`Format salah pada baris: "${line}"`);
+        }
+      });
+
+      renderOrders();
+      bulkInput.value = '';
+    });
+
+    // Process order dan tampilkan struk
+    processBtn.addEventListener('click', function(){
+      if(orders.length === 0){
+        alert("Belum ada orderan untuk diproses!");
+        return;
+      }
+
+      let receiptHtml = `
+        <div style="text-align: center;">
+          <h2>Toko Nasi Cumi Maknyus</h2>
+          <p>Jl. Kenikmatan No.88, Phnom Penh</p>
+          <p><strong>YUK BELI!!</strong></p>
+          <hr>
+        </div>
+        <table border="1" cellspacing="0" cellpadding="5" width="100%" style="border-collapse: collapse; margin-top: 10px;">
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama Pemesan</th>
+              <th>Menu</th>
+              <th>Jumlah</th>
+              <th>Harga</th>
+              <th>Total</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+      orders.forEach((order, index) => {
+        receiptHtml += `
+          <tr>
+            <td style="text-align:center;">${index + 1}</td>
+            <td>${order.customerName}</td>
+            <td>${order.menu}</td>
+            <td style="text-align:center;">${order.quantity}</td>
+            <td style="text-align:right;">KHR ${order.price.toLocaleString()}</td>
+            <td style="text-align:right;">KHR ${order.total.toLocaleString()}</td>
+            <td style="text-align:center;">${order.paymentStatus}</td>
+          </tr>`;
+      });
+
+      const totalAll = orders.reduce((sum, order) => sum + order.total, 0);
+
+      receiptHtml += `
+          </tbody>
+        </table>
+        <h3 style="text-align: right; margin-top: 20px;">Total Bayar: KHR ${totalAll.toLocaleString()}</h3>
+
+        <h3 style="margin-top: 30px;">Silakan Bayar via QRIS:</h3>
+        <div style="text-align: center; margin-top: 10px;">
+          <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACtWK6eAAAACXBIWXMAAA7EAAAOxAGVKw4bAAACgUlEQVR4nO3cQW7DIBAF0Wz//y9sAVUr0QGpPd2Z3+diUSQE0du21QIAAAAAAAAAAAAAwOck1m8z6Nzfb8/Mp2WzD1jz3e43efacX4+uJzznnGWXNOedddY5zznnnmOa9xtavudZcrXKQbF0m93O3Gn48Zxnwpr56sFafBeUlz+5NnnXeeedd15555x333nnnXfeeefdddededcx3cVyrXKccpf0qTqJzLGfY5rPylWWcaS/XY6nFLXVWueQbPZyv6ez3OTnOfc5zzn7Oc8Z+TXXn3nkX3LMd75r4nHu3NfMct85yz2uuR2eZ5X+uf/z//HbPu1i/zfeZZ13gAAAAAAAAAAAOAj4HGo9TwOj3rjAAAAAElFTkSuQmCC"
+               alt="QRIS Pembayaran" width="150" />
+        </div>
+      </div>`;
+
+      receiptContent.innerHTML = receiptHtml;
+      receiptModal.style.display = 'block';
+
+      html2pdf()
+        .from(receiptContent)
+        .set({
+          margin: 10,
+          filename: `struk_pembayaran_${Date.now()}.pdf`,
+          html2canvas: { scale: 2 },
+          jsPDF: { unit: 'mm', format: 'a5', orientation: 'portrait' }
+        })
+        .save()
+        .then(() => {
+          receiptModal.style.display = 'none';
+          orders = [];
+          renderOrders();
+        });
+    });
+
+    // Tutup modal struk
+    function closeReceipt() {
+      receiptModal.style.display = 'none';
+    }
+    window.closeReceipt = closeReceipt;
+
+    // Tutup modal klik luar
+    window.onclick = function(event) {
+      if(event.target === receiptModal) {
+        receiptModal.style.display = 'none';
+      }
+    };
+  </script>
+</body>
+</html>
